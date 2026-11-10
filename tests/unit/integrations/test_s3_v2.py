@@ -887,6 +887,87 @@ async def test_backoff_is_jittered_so_throttled_uploads_do_not_retry_in_lockstep
 
 
 @pytest.mark.asyncio
+async def test_single_failed_s3_event_expires_even_when_every_upload_fails() -> None:
+    logger = S3Logger(
+        s3_bucket_name="test-bucket",
+        s3_aws_access_key_id="test-key",
+        s3_aws_secret_access_key="test-secret",
+        s3_region_name="us-east-1",
+        s3_max_retry_age_seconds=1,
+    )
+    logger.log_queue = [_element({"i": "never-delivered"}, "never-delivered")]
+
+    with patch.object(logger, "_upload_outcome", new_callable=AsyncMock, return_value="retry"):
+        with patch("litellm.integrations.s3_v2.time.monotonic", return_value=_NOW):
+            await logger.flush_queue()
+        assert len(logger.log_queue) == 1
+        assert logger.log_queue[0].retrying_since == _NOW
+
+        with patch("litellm.integrations.s3_v2.time.monotonic", return_value=_NOW + 2):
+            await logger.flush_queue()
+        assert logger.log_queue == []
+
+
+@pytest.mark.asyncio
+async def test_s3_bucket_wide_outage_retains_retries_beyond_retry_age() -> None:
+    logger = S3Logger(
+        s3_bucket_name="test-bucket",
+        s3_aws_access_key_id="test-key",
+        s3_aws_secret_access_key="test-secret",
+        s3_region_name="us-east-1",
+        s3_max_retry_age_seconds=1,
+    )
+    logger.log_queue = [
+        _element({"i": "a"}, "a").model_copy(update={"retrying_since": _NOW - 100}),
+        _element({"i": "b"}, "b").model_copy(update={"retrying_since": _NOW - 100}),
+    ]
+
+    with (
+        patch.object(logger, "_upload_outcome", new_callable=AsyncMock, return_value="retry"),
+        patch("litellm.integrations.s3_v2.time.monotonic", return_value=_NOW),
+    ):
+        await logger.flush_queue()
+
+    assert len(logger.log_queue) == 2
+
+
+@pytest.mark.asyncio
+async def test_s3_bucket_wide_terminal_rejections_are_never_requeued() -> None:
+    logger = S3Logger(
+        s3_bucket_name="test-bucket",
+        s3_aws_access_key_id="test-key",
+        s3_aws_secret_access_key="test-secret",
+        s3_region_name="us-east-1",
+    )
+    logger.log_queue = [_element({"i": "bad-a"}, "bad-a"), _element({"i": "bad-b"}, "bad-b")]
+
+    with patch.object(logger, "_upload_outcome", new_callable=AsyncMock, return_value="dropped"):
+        await logger.flush_queue()
+
+    assert logger.log_queue == []
+
+
+@pytest.mark.asyncio
+async def test_s3_bucket_wide_mixed_failures_only_requeue_retryable_events() -> None:
+    logger = S3Logger(
+        s3_bucket_name="test-bucket",
+        s3_aws_access_key_id="test-key",
+        s3_aws_secret_access_key="test-secret",
+        s3_region_name="us-east-1",
+    )
+    logger.log_queue = [_element({"i": "bad"}, "bad"), _element({"i": "retry"}, "retry")]
+
+    async def outcome(element: s3BatchLoggingElement) -> str:
+        return "dropped" if element.payload["i"] == "bad" else "retry"
+
+    with patch.object(logger, "_upload_outcome", side_effect=outcome):
+        await logger.flush_queue()
+
+    assert len(logger.log_queue) == 1
+    assert logger.log_queue[0].payload["i"] == "retry"
+
+
+@pytest.mark.asyncio
 async def test_dropped_uploads_are_logged_once_per_flush_naming_each_reason(caplog) -> None:
     logger = S3Logger(
         s3_bucket_name="test-bucket",
