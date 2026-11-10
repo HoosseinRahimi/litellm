@@ -707,7 +707,7 @@ class S3Logger(CustomBatchLogger, BaseAWSLLM):
         # Preserve retryable events during a genuine batch-wide outage. A single
         # failed event cannot establish a bucket outage, so its retry age must
         # still be enforced rather than allowing it to retry indefinitely.
-        bucket_wide: Final = delivered == 0 and len(uploads) > 1
+        bucket_wide: Final = delivered == 0 and len(batch) > 1
         failed: Final = tuple(
             (element, outcome) for element, outcome in zip(uploads, results, strict=True) if outcome != "delivered"
         )
