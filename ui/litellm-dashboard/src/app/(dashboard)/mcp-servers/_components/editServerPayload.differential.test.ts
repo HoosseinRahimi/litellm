@@ -456,3 +456,73 @@ it.each([
   if (result.kind !== "ok") throw new Error("Expected valid MCP server payload");
   expect(result.payload.credentials).toEqual({ scopes: expected, client_id: null, client_secret: null });
 });
+
+
+it.each([
+  { label: "empty list", scopes: [] },
+  { label: "blank entries", scopes: ["", null] },
+])("persists an explicit clear for OAuth2 M2M scopes ($label)", ({ scopes }) => {
+  const values: EditServerFormValues = {
+    auth_type: AUTH_TYPE.OAUTH2,
+    oauth_flow_type: OAUTH_FLOW.M2M,
+    transport: "http",
+    credentials: { client_id: "cid", client_secret: "csec", scopes },
+  };
+  const ui: EditServerUiState = {
+    ...baseUi,
+    mcpServer: { ...baseUi.mcpServer, auth_type: AUTH_TYPE.OAUTH2 },
+  };
+  const result = buildEditServerPayload(values, ui);
+  expect(result.kind).toBe("ok");
+  if (result.kind !== "ok") throw new Error("Expected valid MCP server payload");
+  expect(result.payload.credentials).toEqual({
+    client_id: "cid",
+    client_secret: "csec",
+    scopes: null,
+  });
+});
+
+it("keeps OAuth2 M2M scopes absent when the field was not submitted", () => {
+  const result = buildEditServerPayload(
+    {
+      auth_type: AUTH_TYPE.OAUTH2,
+      oauth_flow_type: OAUTH_FLOW.M2M,
+      transport: "http",
+      credentials: { client_id: "cid" },
+    },
+    { ...baseUi, mcpServer: { ...baseUi.mcpServer, auth_type: AUTH_TYPE.OAUTH2 } },
+  );
+  expect(result.kind).toBe("ok");
+  if (result.kind !== "ok") throw new Error("Expected valid MCP server payload");
+  expect(result.payload.credentials).toEqual({ client_id: "cid" });
+});
+
+it("preserves nonempty OAuth2 M2M scopes", () => {
+  const result = buildEditServerPayload(
+    {
+      auth_type: AUTH_TYPE.OAUTH2,
+      oauth_flow_type: OAUTH_FLOW.M2M,
+      transport: "http",
+      credentials: { client_id: "cid", scopes: ["read", "", "write"] },
+    },
+    { ...baseUi, mcpServer: { ...baseUi.mcpServer, auth_type: AUTH_TYPE.OAUTH2 } },
+  );
+  expect(result.kind).toBe("ok");
+  if (result.kind !== "ok") throw new Error("Expected valid MCP server payload");
+  expect(result.payload.credentials).toEqual({ client_id: "cid", scopes: ["read", "write"] });
+});
+
+it("does not change interactive OAuth2 scope-clearing behavior", () => {
+  const result = buildEditServerPayload(
+    {
+      auth_type: AUTH_TYPE.OAUTH2,
+      oauth_flow_type: OAUTH_FLOW.INTERACTIVE,
+      transport: "http",
+      credentials: { client_id: "cid", scopes: [] },
+    },
+    { ...baseUi, mcpServer: { ...baseUi.mcpServer, auth_type: AUTH_TYPE.OAUTH2 } },
+  );
+  expect(result.kind).toBe("ok");
+  if (result.kind !== "ok") throw new Error("Expected valid MCP server payload");
+  expect(result.payload.credentials).toEqual({ client_id: "cid" });
+});
