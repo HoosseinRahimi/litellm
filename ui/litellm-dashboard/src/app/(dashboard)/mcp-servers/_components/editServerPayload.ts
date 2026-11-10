@@ -354,7 +354,9 @@ export const buildEditServerPayload = (values: EditServerFormValues, ui: EditSer
   // form (e.g. from a prior oauth2 authorize this session) so it can never reach the row.
   const submitCredentials = isClientForwardedTokenMode(restValues.auth_type)
     ? withClearedScopes(preservedAdminCredentials(credentialsPayload), credentialValues)
-    : credentialsPayload;
+    : restValues.auth_type === AUTH_TYPE.OAUTH2 && restValues.oauth_flow_type === OAUTH_FLOW.M2M
+      ? withClearedScopes(credentialsPayload, credentialValues)
+      : credentialsPayload;
   const includeCredentials = restValues.auth_type && AUTH_TYPES_REQUIRING_CREDENTIALS.includes(restValues.auth_type);
 
   const credentialsEntryInput: CredentialsEntryInput = {
