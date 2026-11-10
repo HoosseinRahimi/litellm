@@ -704,13 +704,16 @@ class S3Logger(CustomBatchLogger, BaseAWSLLM):
                 len(uploads),
             )
         delivered: Final = sum(1 for outcome in results if outcome == "delivered")
-        bucket_wide: Final = delivered == 0
+        # Preserve retryable events during a genuine batch-wide outage. A single
+        # failed event cannot establish a bucket outage, so its retry age must
+        # still be enforced rather than allowing it to retry indefinitely.
+        bucket_wide: Final = delivered == 0 and len(uploads) > 1
         failed: Final = tuple(
             (element, outcome) for element, outcome in zip(uploads, results, strict=True) if outcome != "delivered"
         )
         now: Final = time.monotonic()
         requeued: Final = (
-            tuple(element for element, _ in failed)
+            tuple(element for element, outcome in failed if outcome != "dropped")
             if bucket_wide
             else tuple(
                 element
